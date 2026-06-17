@@ -49,7 +49,7 @@ const ResumeAnalyzer = () => {
 
           <h4>Tips:</h4>
           <ul>
-            {result.resumeTips.map((t, i) => <li key={i}>{t}</li>)}
+            {result.resumeTips?.map((t, i) => <li key={i}>{t}</li>)}
           </ul>
         </div>
       )}
