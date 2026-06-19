@@ -15,11 +15,15 @@ const Login = ({ onSwitchToRegister, onLoginSuccess }) => {
     setLoading(true);
 
     try {
-      await login(email, password);
-      onLoginSuccess();
+      const result = await login(email, password);
+      console.log('Login successful:', result);
+      // Wait a moment for context to update
+      setTimeout(() => {
+        onLoginSuccess();
+      }, 500);
     } catch (err) {
+      console.error('Login error:', err);
       setError(err.message);
-    } finally {
       setLoading(false);
     }
   };
