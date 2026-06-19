@@ -4,27 +4,61 @@ const multer = require('multer');
 const pdf = require('pdf-extraction');
 const cors = require('cors');
 const Groq = require('groq-sdk');
+const authRoutes = require('./routes/auth');
 require('dotenv').config();
+
 console.log("Checking API Key:", process.env.GROQ_API_KEY ? "Key Found (Starts with gsk_)" : "Key NOT Found (Undefined)");
 const app = express();
 console.log(
   process.env.GROQ_API_KEY?.substring(0, 10)
 );
+
 // 1. MIDDLEWARE
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // 2. MONGODB CONNECTION
-mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/placement_db')
+mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hiremind_db')
   .then(() => console.log('✅ Connected to MongoDB'))
   .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
 // 3. DATABASE SCHEMA & MODEL
 const AnalysisSchema = new mongoose.Schema({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
   jobTitle: { type: String, required: true },
   matchPercentage: { type: Number, required: true },
   missingSkills: [String],
   resumeTips: [String],
+  atsScore: { type: Number },
+  atsVerdict: { type: String },
+  atsBreakdown: {
+    keywords: { type: Number },
+    skills: { type: Number },
+    projects: { type: Number },
+    experience: { type: Number },
+    formatting: { type: Number }
+  },
+  careerRecommendations: [{
+    title: String,
+    match: Number,
+    salary: String,
+    why: String,
+    missingSkills: [String]
+  }],
+  learningPath: [{
+    skill: String,
+    resource: String,
+    timeframe: String
+  }],
+  interviewQuestions: [{
+    question: String,
+    answerHint: String
+  }],
   timestamp: { type: Date, default: Date.now }
 });
 
@@ -35,24 +69,37 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// 5. ROUTES
+// 5. AUTH ROUTES
+app.use('/api/auth', authRoutes);
 
-// --- ANALYZE & SAVE ROUTE ---
+// 6. ROUTES
+
+// --- ANALYZE & SAVE ROUTE (PROTECTED) ---
 app.post('/api/analyze', upload.single('resume'), async (req, res) => {
-  const pdfData = await pdf(req.file.buffer);
-const resumeText = pdfData.text;
-
-let systemPrompt = "";
-let userPrompt = "";
+  const { protect } = require('./middleware/auth');
+  
   try {
-      const {
-        jobDescription,
-        analysisType
-      } = req.body;
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-    if (analysisType === "medium") {
+    // Check authentication
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: "Not authorized" });
+    }
 
-  systemPrompt =  `
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret_key');
+    const userId = decoded.id;
+
+    const pdfData = await pdf(req.file.buffer);
+    const resumeText = pdfData.text;
+
+    let systemPrompt = "";
+    let userPrompt = "";
+    const { jobDescription, analysisType } = req.body;
+
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    if (analysisType === "medium") {
+      systemPrompt = `
 You are an ATS Evaluator.
 
 Return ONLY valid JSON.
@@ -70,7 +117,7 @@ Return ONLY valid JSON.
 }
 `;
 
-  userPrompt = `
+      userPrompt = `
 Analyze the resume for ATS compatibility.
 
 Resume:
@@ -81,10 +128,8 @@ Return ONLY ATS Score,
 ATS Verdict,
 ATS Breakdown.
 `;
-
-} else {
-
-   systemPrompt =  `
+    } else {
+      systemPrompt = `
 You are an Expert Technical Recruiter, ATS Evaluator, Career Advisor, Resume Reviewer, and Interview Coach.
 
 Analyze the candidate's resume against the provided Job Description.
@@ -119,7 +164,7 @@ ATS Verdict Rules:
 60-69 = Fair
 Below 60 = Needs Improvement
 
-CAREER RECOMMENDATIONS:
+CARIER RECOMMENDATIONS:
 
 Recommend the TOP 3 most suitable career paths.
 
@@ -208,7 +253,7 @@ Return EXACTLY this JSON structure:
 }
 `;
 
-   userPrompt = `
+      userPrompt = `
 Analyze the following resume against the provided job description.
 
 JOB DESCRIPTION:
@@ -247,76 +292,90 @@ Important:
 - Interview questions should be relevant to the candidate profile.
 - Return ONLY JSON.
 `;
-}
-    const chatCompletion =
-  await groq.chat.completions.create({
-    messages: [
-      {
-        role: "system",
-        content: systemPrompt
-      },
-      {
-        role: "user",
-        content: userPrompt
-      }
-    ],
-    model: "llama-3.3-70b-versatile",
-    response_format: {
-      type: "json_object"
     }
-  });
-const resultJson = JSON.parse(
-  chatCompletion.choices[0].message.content
-);
 
-if (!resultJson.careerRecommendations) {
-  resultJson.careerRecommendations = [];
-}
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: userPrompt
+        }
+      ],
+      model: "llama-3.3-70b-versatile",
+      response_format: {
+        type: "json_object"
+      }
+    });
 
-if (!resultJson.atsScore) {
-  resultJson.atsScore = 0;
-}
+    const resultJson = JSON.parse(chatCompletion.choices[0].message.content);
 
-if (!resultJson.atsVerdict) {
-  resultJson.atsVerdict = "Unknown";
-}
+    if (!resultJson.careerRecommendations) {
+      resultJson.careerRecommendations = [];
+    }
 
-if (!resultJson.atsBreakdown) {
-  resultJson.atsBreakdown = {
-    keywords: 0,
-    skills: 0,
-    projects: 0,
-    experience: 0,
-    formatting: 0
-  };
-}
-    // Save to MongoDB (Ensure schema includes new fields)
+    if (!resultJson.atsScore) {
+      resultJson.atsScore = 0;
+    }
+
+    if (!resultJson.atsVerdict) {
+      resultJson.atsVerdict = "Unknown";
+    }
+
+    if (!resultJson.atsBreakdown) {
+      resultJson.atsBreakdown = {
+        keywords: 0,
+        skills: 0,
+        projects: 0,
+        experience: 0,
+        formatting: 0
+      };
+    }
+
+    // Save to MongoDB with userId
     const historyEntry = new Analysis({
+      userId: userId,
       jobTitle: jobDescription.substring(0, 60),
       matchPercentage: resultJson.matchPercentage || 0,
       missingSkills: resultJson.missingSkills || [],
       resumeTips: resultJson.resumeTips || [],
-      // If you updated your schema to include these, uncomment below:
-      // learningPath: resultJson.learningPath || [],
-      // interviewQuestions: resultJson.interviewQuestions || []
+      atsScore: resultJson.atsScore,
+      atsVerdict: resultJson.atsVerdict,
+      atsBreakdown: resultJson.atsBreakdown,
+      careerRecommendations: resultJson.careerRecommendations || [],
+      learningPath: resultJson.learningPath || [],
+      interviewQuestions: resultJson.interviewQuestions || []
     });
 
     await historyEntry.save();
 
     // Return the FULL JSON to the frontend
     res.json(resultJson);
-
   } catch (error) {
     console.error("ANALYSIS ERROR:", error);
     res.status(500).json({ error: "Analysis failed." });
   }
 });
-// --- FETCH HISTORY ROUTE ---
+
+// --- FETCH HISTORY ROUTE (PROTECTED) ---
 app.get('/api/history', async (req, res) => {
   try {
-    const history = await Analysis.find().sort({ timestamp: -1 });
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: "Not authorized" });
+    }
+
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret_key');
+    const userId = decoded.id;
+
+    const history = await Analysis.find({ userId }).sort({ timestamp: -1 });
     res.json(history);
   } catch (error) {
+    console.error('History fetch error:', error);
     res.status(500).json({ error: "Failed to fetch history" });
   }
 });
