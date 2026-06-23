@@ -60,7 +60,7 @@ exports.register = async (req, res) => {
   } catch (error) {
     console.error('Register error:', error);
     res.status(500).json({
-      success: false,
+      success: true,
       error: error.message || 'Server error during registration'
     });
   }
