@@ -14,6 +14,7 @@ console.log(
 app.use(cors());
 app.use(express.json());
 console.log("CORS and JSON middleware enabled(SECURED).");
+console.log("Connecting to MongoDB...");
 // 2. MONGODB CONNECTION
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/placement_db')
   .then(() => console.log('✅ Connected to MongoDB'))
