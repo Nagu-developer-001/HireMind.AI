@@ -321,7 +321,9 @@ app.get('/api/history', async (req, res) => {
     res.status(500).json({ error: "Failed to fetch history" });
   }
 });
-
+app.get("/api/getData",(req,res)=>{
+  console.log("Received request for data");
+});
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
