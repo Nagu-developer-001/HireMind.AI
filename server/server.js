@@ -327,6 +327,9 @@ app.get("/api/getData",(req,res)=>{
 app.get("api/setData",(req,res)=>{
   console.log("Setting Up of Data");
 });
+app.post("api/setData",(req,res)=>{
+  console.log(req.body);
+})
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
